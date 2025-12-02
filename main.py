@@ -1,12 +1,14 @@
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 import random
+import time
 
 
 class Cell:
     def __init__(self):
         self.is_mine = False
         self.opened = False
+               ...
         self.flagged = False
         self.adjacent = 0
 
@@ -23,12 +25,15 @@ class Minesweeper:
         self.cols = 9
         self.mines = 10
 
+        self.started = False
+        self.start_time = None
+
         self.create_menu()
         self.create_status_bar()
         self.create_board_frame()
         self.new_game()
 
-    # --------------------- GUI -----------------------
+    # ------------------GUI
 
     def create_menu(self):
         menubar = tk.Menu(self.master)
@@ -47,13 +52,16 @@ class Minesweeper:
         bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.mines_var = tk.StringVar(value=f"Мины: {self.mines}")
+        self.time_var = tk.StringVar(value="Время: 0s")
+
         tk.Label(bar, textvariable=self.mines_var).pack(side=tk.LEFT, padx=5)
+        tk.Label(bar, textvariable=self.time_var).pack(side=tk.LEFT, padx=5)
 
     def create_board_frame(self):
         self.board_container = tk.Frame(self.frame)
         self.board_container.pack(fill=tk.BOTH, expand=True)
 
-    # ------------------- ИГРА ---------------------------
+    # -----------------ИГРА
 
     def new_game(self):
         for w in self.board_container.winfo_children():
@@ -70,9 +78,16 @@ class Minesweeper:
                 btn = tk.Button(self.board_container, text="", width=2, height=1)
                 btn.grid(row=r, column=c, sticky="nsew")
 
+                btn.bind("<Button-1>", lambda e, rr=r, cc=c: self.on_left(rr, cc))
+                btn.bind("<Button-3>", lambda e, rr=r, cc=c: self.on_right(rr, cc))
+
                 self.buttons[(r, c)] = btn
 
+        self.started = False
+        self.start_time = None
+
         self.mines_var.set(f"Мины: {self.mines}")
+        self.time_var.set("Время: 0s")
 
     def custom_game(self):
         r = simpledialog.askinteger("Строки", "Введите высоту (5–30):", minvalue=5, maxvalue=30)
@@ -88,21 +103,17 @@ class Minesweeper:
         self.rows, self.cols, self.mines = r, c, m
         self.new_game()
 
-    # ----------------------------------------------------
+    # ----------------Минирование
 
     def place_mines(self, first_r, first_c):
-        """Размещаем мины, избегая первой нажатой клетки"""
-
         positions = [(r, c) for r in range(self.rows) for c in range(self.cols)]
-        if (first_r, first_c) in positions:
-            positions.remove((first_r, first_c))
+        positions.remove((first_r, first_c))
 
         mines = random.sample(positions, self.mines)
 
         for r, c in mines:
             self.cells[r][c].is_mine = True
 
-        # Подсчет соседних мин
         for r in range(self.rows):
             for c in range(self.cols):
                 if self.cells[r][c].is_mine:
@@ -116,6 +127,98 @@ class Minesweeper:
                                 count += 1
 
                 self.cells[r][c].adjacent = count
+
+    # -----------------Клики
+
+    def on_left(self, r, c):
+        cell = self.cells[r][c]
+
+        if cell.flagged or cell.opened:
+            return
+
+        if not self.started:
+            self.place_mines(r, c)
+            self.started = True
+            self.start_time = time.time()
+            self.update_timer()
+
+        if cell.is_mine:
+            self.reveal_mines()
+            messagebox.showinfo("Поражение", "Вы подорвались!")
+            self.disable_all()
+            return
+
+        self.open_cell(r, c)
+
+        if self.check_win():
+            self.reveal_mines()
+            messagebox.showinfo("Победа", "Вы выиграли!")
+            self.disable_all()
+
+    def on_right(self, r, c):
+        cell = self.cells[r][c]
+        if cell.opened:
+            return
+
+        cell.flagged = not cell.flagged
+        self.buttons[(r, c)].config(text="⚑" if cell.flagged else "")
+
+        self.mines_var.set(f"Мины: {self.mines - self.count_flags()}")
+
+    # ----------------Открытие
+
+    def open_cell(self, r, c):
+        cell = self.cells[r][c]
+        if cell.opened or cell.flagged:
+            return
+
+        cell.opened = True
+        btn = self.buttons[(r, c)]
+        btn.config(relief=tk.SUNKEN, state=tk.DISABLED)
+
+        if cell.adjacent > 0:
+            btn.config(text=str(cell.adjacent))
+            return
+
+        # Раскрытие пустых зон
+        for rr in range(r - 1, r + 2):
+            for cc in range(c - 1, c + 2):
+                if 0 <= rr < self.rows and 0 <= cc < self.cols:
+                    if not self.cells[rr][cc].opened:
+                        self.open_cell(rr, cc)
+
+    # ----------------Служебные
+
+    def reveal_mines(self):
+        for r in range(self.rows):
+            for c in range(self.cols):
+                if self.cells[r][c].is_mine:
+                    self.buttons[(r, c)].config(text="*")
+
+    def disable_all(self):
+        for r in range(self.rows):
+            for c in range(self.cols):
+                self.buttons[(r, c)].config(state=tk.DISABLED)
+
+    def count_flags(self):
+        return sum(self.cells[r][c].flagged for r in range(self.rows) for c in range(self.cols))
+
+    def check_win(self):
+        for r in range(self.rows):
+            for c in range(self.cols):
+                cell = self.cells[r][c]
+                if not cell.is_mine and not cell.opened:
+                    return False
+        return True
+
+    def update_timer(self):
+        if not self.started:
+            return
+
+        elapsed = int(time.time() - self.start_time)
+        self.time_var.set(f"Время: {elapsed}s")
+
+        self.master.after(1000, self.update_timer)
 
 
 if __name__ == "__main__":
